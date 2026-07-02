@@ -1,4 +1,4 @@
-const scenarioConfigs = {
+let scenarioConfigs = {
   math: {
     id: "math",
     title: "高一数学 · 导数单元",
@@ -428,6 +428,17 @@ const scenarioConfigs = {
 };
 
 let activeScenarioId = "math";
+let dataSource = "前端内置场景数据";
+const API_BASE = window.location.protocol === "file:" ? "http://127.0.0.1:8000" : window.location.origin;
+let aiEnabled = false;
+let aiCapability = {
+  configured: false,
+  enabled: false,
+  provider: "Local rule template",
+  model: "rule-template",
+  mode: "rule-only",
+  detail: "未连接后端，当前使用前端规则模板。",
+};
 
 function cloneData(data) {
   return JSON.parse(JSON.stringify(data));
@@ -474,6 +485,30 @@ function getStatusByMastery(mastery) {
   if (mastery < 55) return { name: "薄弱", color: "#c9503f" };
   if (mastery < 75) return { name: "待巩固", color: "#d99a36" };
   return { name: "已掌握", color: "#2d6a57" };
+}
+
+function getAiModeLabel() {
+  const report = state.result?.aiReport;
+  if (report?.mode === "llm") return "大模型增强";
+  if (report?.mode === "fallback") return "规则降级";
+  return aiEnabled ? "AI 待生成" : "规则模板";
+}
+
+function getAiStatusText() {
+  const report = state.result?.aiReport;
+  if (report?.status) return report.status;
+  if (!aiEnabled) return "AI 增强关闭，诊断建议由本地规则模板生成。";
+  if (aiCapability.configured) {
+    return `AI 增强已开启，后端将调用 ${aiCapability.provider} / ${aiCapability.model}。`;
+  }
+  return "AI 增强已开启，但后端未配置 API Key；提交后会自动降级为规则模板。";
+}
+
+function renderAiToggle() {
+  const toggle = document.querySelector("#aiToggle");
+  if (toggle) toggle.checked = aiEnabled;
+  const mode = document.querySelector("#aiReportMode");
+  if (mode) mode.textContent = getAiModeLabel();
 }
 
 function formatTime(seconds) {
@@ -548,9 +583,13 @@ function switchScenario(scenarioId) {
   if (!scenarioConfigs[scenarioId] || scenarioId === activeScenarioId) return;
   activeScenarioId = scenarioId;
   state = createState(getScenario());
+  if (dataSource.includes("FastAPI")) {
+    state.backendStatus = "已连接 FastAPI 后端，提交诊断会写入 SQLite。";
+  }
   document.querySelector("#quizTimer").textContent = "00:00";
   renderScenarioControls();
   renderScenarioText();
+  renderAiToggle();
   renderQuiz();
   updateAll();
   switchView("overview");
@@ -724,13 +763,14 @@ async function syncBackendDiagnosis() {
   state.backendStatus = "正在同步 FastAPI 后端...";
   renderTechContent();
   try {
-    const response = await fetch("http://127.0.0.1:8000/api/diagnosis", {
+    const response = await fetch(`${API_BASE}/api/diagnosis`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         scenario_id: activeScenarioId,
         student_id: "demo-student",
         elapsed_seconds: state.elapsedSeconds,
+        ai_enabled: aiEnabled,
         answers: Object.entries(state.answers).map(([question_id, selected_answer]) => ({
           question_id,
           selected_answer,
@@ -739,10 +779,19 @@ async function syncBackendDiagnosis() {
     });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const data = await response.json();
-    state.backendStatus = `已同步后端：诊断记录 ${data.diagnosis_id}，正确率 ${data.accuracy}%`;
+    if (state.result && data.ai_report) {
+      state.result.aiReport = data.ai_report;
+    }
+    state.backendStatus = `已同步后端：诊断记录 ${data.diagnosis_id}，正确率 ${data.accuracy}%，AI：${getAiModeLabel()}`;
   } catch (error) {
-    state.backendStatus = "后端未启动，已自动降级为前端本地诊断。";
+    state.backendStatus = "后端未启动或网络不可达，已自动降级为前端本地诊断。";
+    if (state.result) {
+      state.result.aiReport = buildLocalAiReport(
+        aiEnabled ? "AI 增强请求失败，已使用前端规则模板兜底。" : "AI 增强关闭，当前使用前端规则模板。",
+      );
+    }
   }
+  updateAll();
   renderTechContent();
 }
 
@@ -752,7 +801,7 @@ function getTopError() {
   return sorted[0]?.[0] || "暂无明显错因";
 }
 
-function generateAdvice() {
+function buildRuleAdvice() {
   const scenario = getScenario();
   if (!state.result) {
     return `完成 ${scenario.unit} 测验后，系统会根据错因标签和薄弱知识点生成个性化学习建议。`;
@@ -761,6 +810,27 @@ function generateAdvice() {
   const topError = getTopError();
   const accuracyText = `${state.result.totalCorrect}/${getQuestions().length}`;
   return `本次 ${scenario.subject} 诊断答对 ${accuracyText} 题，最薄弱知识点是“${weakest.name}”。主要问题集中在“${topError}”：不是简单分数低，而是相关前置知识和任务步骤没有稳定连接。建议先复习“${weakest.name}”对应资源，再完成系统生成的基础练习，最后进入一题综合迁移任务。`;
+}
+
+function buildLocalAiReport(status) {
+  const scenario = getScenario();
+  const weakest = state.result ? state.result.weakestNodes[0] : getWeakestNodes(1)[0];
+  const topError = getTopError();
+  return {
+    enabled: aiEnabled,
+    configured: false,
+    mode: aiEnabled ? "fallback" : "rule",
+    provider: "frontend-rule-template",
+    model: "rule-template",
+    status,
+    advice: buildRuleAdvice(),
+    teacher_suggestion: `建议教师围绕“${weakest.name}”做短讲与即时练习，重点处理“${topError}”这一类错误。`,
+    practice_prompt: `围绕“${scenario.unit} · ${weakest.name}”生成基础、提升、综合三层练习，并要求学生写出解题依据。`,
+  };
+}
+
+function generateAdvice() {
+  return state.result?.aiReport?.advice || buildRuleAdvice();
 }
 
 function buildRecommendations() {
@@ -819,6 +889,8 @@ function renderStudentContent() {
     summary.textContent = `尚未提交 ${scenario.unit} 测验。可先进入“智能答题”页面完成诊断。`;
   }
   advice.textContent = generateAdvice();
+  advice.title = getAiStatusText();
+  renderAiToggle();
 
   document.querySelector("#recommendList").innerHTML = buildRecommendations()
     .map(
@@ -1139,7 +1211,7 @@ function renderTechContent() {
     },
     {
       title: "5. 生成推荐与教师干预",
-      detail: "提取最薄弱知识点，生成学习路径、练习任务、错因排行和分层作业。",
+      detail: "提取最薄弱知识点，生成学习路径、练习任务、错因排行和分层作业；AI 开启时再由大模型润色建议。",
     },
   ]
     .map(
@@ -1159,7 +1231,9 @@ function renderTechContent() {
     { label: "错因类型", value: errorTypes.size, detail: [...errorTypes].join(" / ") },
     { label: "推荐资源", value: resourceCount, detail: "微课、例题、巩固题、错题复盘" },
     { label: "练习模板", value: practiceCount, detail: "按薄弱知识点动态抽取生成" },
+    { label: "数据来源", value: dataSource.includes("FastAPI") ? "API" : "LOCAL", detail: dataSource },
     { label: "后端同步", value: state.backendStatus.includes("已同步") ? "ON" : "OFF", detail: state.backendStatus },
+    { label: "AI 生成层", value: aiEnabled ? "ON" : "OFF", detail: getAiStatusText() },
   ]
     .map(
       (item) => `
@@ -1173,8 +1247,9 @@ function renderTechContent() {
     .join("");
 
   document.querySelector("#interfaceList").innerHTML = [
+    ["renderAiToggle()", "GET /api/ai/status", "读取大模型配置状态并控制增强开关"],
     ["renderQuiz()", "GET /api/questions", "按场景渲染诊断题"],
-    ["diagnoseAnswers()", "POST /api/diagnosis", "生成错因与掌握度更新"],
+    ["diagnoseAnswers()", "POST /api/diagnosis", "生成错因、掌握度更新与可选 AI 报告"],
     ["renderKnowledgeGraph()", "GET /api/knowledge-graph", "输出节点颜色和依赖边"],
     ["buildRecommendations()", "GET /api/recommendations", "按薄弱知识点推荐资源"],
     ["buildPractice()", "POST /api/practice/generate", "生成下一组分层练习"],
@@ -1426,10 +1501,14 @@ function updateAll() {
 
 function resetDemo() {
   state = createState(getScenario());
+  if (dataSource.includes("FastAPI")) {
+    state.backendStatus = "已连接 FastAPI 后端，提交诊断会写入 SQLite。";
+  }
   document.querySelectorAll(".question-list input").forEach((input) => {
     input.checked = false;
   });
   document.querySelector("#quizTimer").textContent = "00:00";
+  renderAiToggle();
   renderProgress();
   updateAll();
   switchView("overview");
@@ -1440,6 +1519,17 @@ function bindEvents() {
     item.addEventListener("click", () => switchView(item.dataset.view));
   });
   document.querySelector("#scenarioSelect").addEventListener("change", (event) => switchScenario(event.target.value));
+  document.querySelector("#aiToggle").addEventListener("change", (event) => {
+    aiEnabled = event.target.checked;
+    if (state.result) {
+      state.result.aiReport = buildLocalAiReport(
+        aiEnabled ? "AI 增强已开启，将在下一次提交诊断时请求后端生成。" : "AI 增强关闭，当前显示本地规则模板。",
+      );
+    }
+    renderAiToggle();
+    renderStudentContent();
+    renderTechContent();
+  });
   document.querySelector("#fillDemoBtn").addEventListener("click", fillDemoAnswers);
   document.querySelector("#submitQuizBtn").addEventListener("click", submitQuiz);
   document.querySelector("#generatePracticeBtn").addEventListener("click", () => {
@@ -1461,9 +1551,37 @@ function startTimer() {
   }, 1000);
 }
 
-function boot() {
+async function loadBackendBootstrap() {
+  try {
+    const response = await fetch(`${API_BASE}/api/bootstrap`, { cache: "no-store" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    if (!data.scenarios || !data.scenarios.math) throw new Error("Invalid bootstrap payload");
+    scenarioConfigs = data.scenarios;
+    aiCapability = data.ai || aiCapability;
+    dataSource = "FastAPI + SQLite 后端场景数据";
+    activeScenarioId = scenarioConfigs[activeScenarioId] ? activeScenarioId : Object.keys(scenarioConfigs)[0];
+    state = createState(getScenario());
+    state.backendStatus = "已连接 FastAPI 后端，提交诊断会写入 SQLite。";
+  } catch (error) {
+    aiCapability = {
+      configured: false,
+      enabled: false,
+      provider: "Local rule template",
+      model: "rule-template",
+      mode: "rule-only",
+      detail: "未连接后端，当前使用前端规则模板。",
+    };
+    dataSource = "前端内置场景数据";
+    state.backendStatus = "未连接后端，当前使用前端规则引擎。";
+  }
+}
+
+async function boot() {
+  await loadBackendBootstrap();
   renderScenarioControls();
   renderScenarioText();
+  renderAiToggle();
   renderQuiz();
   renderStudentContent();
   renderTeacherContent();

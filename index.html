@@ -55,14 +55,22 @@
 
       <main class="workspace">
         <header class="topbar">
-          <div>
+          <div class="topbar-copy">
             <span class="eyebrow">Smart Education Final Project</span>
-            <h1>基于知识图谱的错题诊断与个性化练习生成系统</h1>
+            <h1>
+              <span class="title-line title-brand">EduPath</span>
+              <span class="title-line">智能导学 Agent</span>
+            </h1>
+            <p class="topbar-subtitle">基于知识图谱驱动的错题诊断、学习路径推荐与教师精准干预系统</p>
           </div>
           <div class="top-actions">
             <label class="scenario-switch">
               <span>应用场景</span>
               <select id="scenarioSelect" aria-label="切换应用场景"></select>
+            </label>
+            <label class="ai-toggle" title="开启后会请求后端大模型增强；未配置 API Key 时自动降级为规则模板">
+              <input type="checkbox" id="aiToggle" />
+              <span>AI 增强</span>
             </label>
             <button class="icon-btn" id="resetBtn" type="button" title="重置演示数据">↻</button>
             <button class="primary-btn" data-view="quiz" type="button">开始答题诊断</button>
@@ -227,7 +235,10 @@
                 </div>
               </div>
               <div class="diagnosis-box">
-                <span>AI 学习建议</span>
+                <div class="diagnosis-title-row">
+                  <span>AI 学习建议</span>
+                  <b id="aiReportMode">规则模板</b>
+                </div>
                 <p id="studentAdvice">完成测验后，系统会根据错因标签和薄弱知识点生成个性化学习建议。</p>
               </div>
               <div class="recommend-list" id="recommendList"></div>

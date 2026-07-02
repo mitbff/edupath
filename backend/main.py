@@ -8,10 +8,17 @@ from uuid import uuid4
 import sqlite3
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
+
+try:
+    from llm_service import generate_ai_report, get_ai_status
+except ImportError:  # pragma: no cover - supports package-style imports.
+    from .llm_service import generate_ai_report, get_ai_status
 
 
 DB_PATH = Path(__file__).with_name("edupath.db")
+FRONTEND_DIR = Path(__file__).resolve().parent.parent
 
 
 SCENARIOS: dict[str, dict[str, Any]] = {
@@ -111,6 +118,136 @@ SCENARIOS: dict[str, dict[str, Any]] = {
 RESOURCE_TYPES = ["微课", "例题", "巩固题", "错题复盘"]
 
 
+QUESTION_OPTIONS: dict[str, dict[str, list[dict[str, str]]]] = {
+    "math": {
+        "q1": [
+            {"key": "A", "text": "函数图像经过原点", "reason": "忽略了一次函数截距。"},
+            {"key": "B", "text": "函数随 x 增大而减小", "reason": "没有根据斜率判断单调性。"},
+            {"key": "C", "text": "函数随 x 增大而增大", "reason": ""},
+            {"key": "D", "text": "函数没有斜率", "reason": "混淆了曲线和直线的斜率概念。"},
+        ],
+        "q2": [
+            {"key": "A", "text": "0", "reason": "只看到了分子趋近于 0，忽略了整体极限。"},
+            {"key": "B", "text": "1", "reason": ""},
+            {"key": "C", "text": "不存在", "reason": "把函数值不存在和极限不存在混在一起。"},
+            {"key": "D", "text": "无穷大", "reason": "对分母趋近于 0 的情形判断过度。"},
+        ],
+        "q3": [
+            {"key": "A", "text": "增量比值在 h 趋近于 0 时的极限", "reason": ""},
+            {"key": "B", "text": "函数值 f(x0) 本身", "reason": "把函数值和变化率混淆了。"},
+            {"key": "C", "text": "任意两点的平均变化率", "reason": "没有体现局部极限过程。"},
+            {"key": "D", "text": "二阶导数的符号", "reason": "把导数定义和凹凸性判断混在一起。"},
+        ],
+        "q4": [
+            {"key": "A", "text": "函数图像与 x 轴的交点", "reason": "把零点和导数意义混淆。"},
+            {"key": "B", "text": "函数图像围成的面积", "reason": "把导数和积分意义混淆。"},
+            {"key": "C", "text": "函数最大值", "reason": "把导数工具和目标结论混淆。"},
+            {"key": "D", "text": "曲线在某点切线的斜率", "reason": ""},
+        ],
+        "q5": [
+            {"key": "A", "text": "递减", "reason": "导数符号和单调性关系记反。"},
+            {"key": "B", "text": "递增", "reason": ""},
+            {"key": "C", "text": "先增后减", "reason": "把局部变化和整体符号条件混淆。"},
+            {"key": "D", "text": "无法判断", "reason": "忽略了区间内导数始终为正的条件。"},
+        ],
+        "q6": [
+            {"key": "A", "text": "直接代入端点即可", "reason": "把闭区间最值和极值问题混淆。"},
+            {"key": "B", "text": "只看函数图像是否好看", "reason": "缺少可验证的数学步骤。"},
+            {"key": "C", "text": "求导、找驻点、判断导数符号变化", "reason": ""},
+            {"key": "D", "text": "只要求出二阶导数即可", "reason": "方法过度简化，忽略一阶导数变化。"},
+        ],
+        "q7": [
+            {"key": "A", "text": "根据题意建立目标函数和约束关系", "reason": ""},
+            {"key": "B", "text": "直接令导数等于 0", "reason": "跳过了建模步骤，容易列错函数。"},
+            {"key": "C", "text": "先猜一个答案", "reason": "缺少可解释推理过程。"},
+            {"key": "D", "text": "只计算端点值", "reason": "没有分析内部可能的最优点。"},
+        ],
+        "q8": [
+            {"key": "A", "text": "删除约束条件", "reason": "实际问题必须保留定义域和约束。"},
+            {"key": "B", "text": "只比较两个随机数值", "reason": "样本点不能替代完整分析。"},
+            {"key": "C", "text": "把函数值全部看作相等", "reason": "忽略了函数变化。"},
+            {"key": "D", "text": "求导并结合定义域比较候选点", "reason": ""},
+        ],
+    },
+    "english": {
+        "q1": [
+            {"key": "A", "text": "tiny", "reason": "把反义词当成近义词。"},
+            {"key": "B", "text": "important", "reason": ""},
+            {"key": "C", "text": "usual", "reason": "只根据熟悉程度猜测。"},
+            {"key": "D", "text": "silent", "reason": "混淆形近词。"},
+        ],
+        "q2": [
+            {"key": "A", "text": "The title only", "reason": "只看标题，忽略上下文证据。"},
+            {"key": "B", "text": "The last paragraph only", "reason": "范围过窄。"},
+            {"key": "C", "text": "The previous cause and comparison", "reason": ""},
+            {"key": "D", "text": "A random sentence", "reason": "缺少定位策略。"},
+        ],
+        "q3": [
+            {"key": "A", "text": "找主干谓语和核心主语", "reason": ""},
+            {"key": "B", "text": "逐词翻译所有修饰语", "reason": "先抓细节会丢失句子主干。"},
+            {"key": "C", "text": "直接猜选项", "reason": "缺少语法依据。"},
+            {"key": "D", "text": "只看标点", "reason": "标点不能替代句法分析。"},
+        ],
+        "q4": [
+            {"key": "A", "text": "只找第一个相似词", "reason": "关键词相同不等于信息匹配。"},
+            {"key": "B", "text": "忽略否定词", "reason": "except 本身就是反向条件。"},
+            {"key": "C", "text": "不回原文", "reason": "细节题需要证据定位。"},
+            {"key": "D", "text": "题目要求选择不符合原文的一项", "reason": ""},
+        ],
+        "q5": [
+            {"key": "A", "text": "关注反复出现的主题", "reason": "这是合理策略。"},
+            {"key": "B", "text": "结合首尾段判断", "reason": "这是合理策略。"},
+            {"key": "C", "text": "把某个细节当成全文主题", "reason": ""},
+            {"key": "D", "text": "排除范围过窄的选项", "reason": "这是合理策略。"},
+        ],
+        "q6": [
+            {"key": "A", "text": "覆盖全文核心观点，范围适中", "reason": ""},
+            {"key": "B", "text": "只复述一个例子", "reason": "范围过窄。"},
+            {"key": "C", "text": "包含文章没有提到的信息", "reason": "过度推断。"},
+            {"key": "D", "text": "越长越好", "reason": "标题长度不是判断标准。"},
+        ],
+    },
+    "python": {
+        "q1": [
+            {"key": "A", "text": "int", "reason": "没有区分输入文本和数值转换。"},
+            {"key": "B", "text": "str", "reason": ""},
+            {"key": "C", "text": "float", "reason": "把小数类型和输入函数混淆。"},
+            {"key": "D", "text": "bool", "reason": "类型判断错误。"},
+        ],
+        "q2": [
+            {"key": "A", "text": "score >= 60", "reason": ""},
+            {"key": "B", "text": "score = 60", "reason": "把赋值和比较混淆。"},
+            {"key": "C", "text": "score < 0", "reason": "判断目标偏离题意。"},
+            {"key": "D", "text": "score + 60", "reason": "表达式不是布尔判断。"},
+        ],
+        "q3": [
+            {"key": "A", "text": "1, 2, 3", "reason": "误以为 range 从 1 开始。"},
+            {"key": "B", "text": "0, 1, 2, 3", "reason": "忽略了右边界不包含。"},
+            {"key": "C", "text": "3", "reason": "把 range 参数当成唯一值。"},
+            {"key": "D", "text": "0, 1, 2", "reason": ""},
+        ],
+        "q4": [
+            {"key": "A", "text": "只是在屏幕上打印内容", "reason": "混淆了 print 和 return。"},
+            {"key": "B", "text": "删除函数", "reason": "语义理解错误。"},
+            {"key": "C", "text": "把结果返回给函数调用处", "reason": ""},
+            {"key": "D", "text": "自动创建循环", "reason": "把函数和循环混淆。"},
+        ],
+        "q5": [
+            {"key": "A", "text": "参与运算的变量类型是否匹配", "reason": ""},
+            {"key": "B", "text": "电脑是否没电", "reason": "不是代码层面的定位。"},
+            {"key": "C", "text": "把所有代码删除", "reason": "没有形成调试策略。"},
+            {"key": "D", "text": "只改变量名颜色", "reason": "不影响类型错误。"},
+        ],
+        "q6": [
+            {"key": "A", "text": "先写所有代码再猜哪里错", "reason": "缺少模块化思路。"},
+            {"key": "B", "text": "输入数据、计算平均分、判断等级、输出结果", "reason": ""},
+            {"key": "C", "text": "只写 print('完成')", "reason": "没有实现核心功能。"},
+            {"key": "D", "text": "只关注界面颜色", "reason": "偏离程序逻辑。"},
+        ],
+    },
+}
+
+
 class AnswerItem(BaseModel):
     question_id: str
     selected_answer: str
@@ -120,6 +257,7 @@ class DiagnosisRequest(BaseModel):
     scenario_id: str
     student_id: str = "demo-student"
     elapsed_seconds: int = 0
+    ai_enabled: bool = False
     answers: list[AnswerItem]
 
 
@@ -164,6 +302,14 @@ def init_db() -> None:
                 error_tag TEXT NOT NULL,
                 PRIMARY KEY (scenario_id, id)
             );
+            CREATE TABLE IF NOT EXISTS question_options (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                scenario_id TEXT NOT NULL,
+                question_id TEXT NOT NULL,
+                option_key TEXT NOT NULL,
+                option_text TEXT NOT NULL,
+                reason TEXT NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS resources (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 scenario_id TEXT NOT NULL,
@@ -204,6 +350,9 @@ def init_db() -> None:
         )
         count = conn.execute("SELECT COUNT(*) AS c FROM scenarios").fetchone()["c"]
         if count:
+            option_count = conn.execute("SELECT COUNT(*) AS c FROM question_options").fetchone()["c"]
+            if not option_count:
+                seed_options(conn)
             return
         seed_db(conn)
 
@@ -234,6 +383,106 @@ def seed_db(conn: sqlite3.Connection) -> None:
             "INSERT INTO resources (scenario_id, knowledge_id, type, title) VALUES (?, ?, ?, ?)",
             resources,
         )
+    seed_options(conn)
+
+
+def seed_options(conn: sqlite3.Connection) -> None:
+    for scenario_id, by_question in QUESTION_OPTIONS.items():
+        rows = []
+        for question_id, options in by_question.items():
+            for option in options:
+                rows.append((scenario_id, question_id, option["key"], option["text"], option["reason"]))
+        conn.executemany(
+            """
+            INSERT INTO question_options
+            (scenario_id, question_id, option_key, option_text, reason)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            rows,
+        )
+
+
+def get_question_options(conn: sqlite3.Connection, scenario_id: str, question_id: str) -> list[dict[str, str]]:
+    return [
+        {"key": row["option_key"], "text": row["option_text"], "reason": row["reason"]}
+        for row in conn.execute(
+            """
+            SELECT option_key, option_text, reason
+            FROM question_options
+            WHERE scenario_id = ? AND question_id = ?
+            ORDER BY option_key
+            """,
+            (scenario_id, question_id),
+        ).fetchall()
+    ]
+
+
+def get_frontend_config(conn: sqlite3.Connection, scenario_id: str) -> dict[str, Any]:
+    scenario = conn.execute("SELECT * FROM scenarios WHERE id = ?", (scenario_id,)).fetchone()
+    if not scenario:
+        raise HTTPException(status_code=404, detail="Scenario not found")
+    nodes = conn.execute(
+        "SELECT id, name, initial_mastery, note FROM knowledge_nodes WHERE scenario_id = ?",
+        (scenario_id,),
+    ).fetchall()
+    edges = conn.execute(
+        "SELECT source_id, target_id FROM knowledge_edges WHERE scenario_id = ?",
+        (scenario_id,),
+    ).fetchall()
+    questions = conn.execute(
+        "SELECT * FROM questions WHERE scenario_id = ? ORDER BY id",
+        (scenario_id,),
+    ).fetchall()
+    resources = conn.execute(
+        "SELECT knowledge_id, type, title FROM resources WHERE scenario_id = ? ORDER BY id",
+        (scenario_id,),
+    ).fetchall()
+    resource_bank: dict[str, list[str]] = {}
+    practice_bank: dict[str, list[str]] = {}
+    for row in resources:
+        resource_bank.setdefault(row["knowledge_id"], []).append(row["title"])
+        practice_bank.setdefault(row["knowledge_id"], []).append(f"{row['title']}：完成一个针对性任务并写出过程说明。")
+
+    title = scenario["title"]
+    short_title = "数学导数" if scenario_id == "math" else "英语阅读" if scenario_id == "english" else "Python 编程"
+    student_name = "林一然" if scenario_id == "math" else "陈知语" if scenario_id == "english" else "周序言"
+    avatar = student_name[0]
+
+    return {
+        "id": scenario_id,
+        "title": title,
+        "shortTitle": short_title,
+        "unit": scenario["unit"],
+        "subject": scenario["subject"],
+        "studentName": student_name,
+        "avatar": avatar,
+        "description": scenario["description"],
+        "nodes": [
+            {"id": row["id"], "name": row["name"], "mastery": row["initial_mastery"], "note": row["note"]}
+            for row in nodes
+        ],
+        "links": [[row["source_id"], row["target_id"]] for row in edges],
+        "questions": [
+            {
+                "id": row["id"],
+                "knowledge": row["knowledge_id"],
+                "stem": row["stem"],
+                "answer": row["answer"],
+                "difficulty": row["difficulty"],
+                "errorTag": row["error_tag"],
+                "options": get_question_options(conn, scenario_id, row["id"]),
+            }
+            for row in questions
+        ],
+        "resourceBank": resource_bank,
+        "practiceBank": practice_bank,
+        "classStudents": [
+            {"name": "周明澈", "score": 76, "weak": "综合应用", "layer": "提升组", "risk": "中关注"},
+            {"name": "许安宁", "score": 89, "weak": "拓展迁移", "layer": "冲刺组", "risk": "低关注"},
+            {"name": "陈星野", "score": 54, "weak": "前置基础、核心概念", "layer": "基础组", "risk": "高关注"},
+            {"name": "李若川", "score": 70, "weak": "方法选择", "layer": "提升组", "risk": "中关注"},
+        ],
+    }
 
 
 def get_current_mastery(conn: sqlite3.Connection, scenario_id: str, student_id: str) -> dict[str, int]:
@@ -272,14 +521,30 @@ app.add_middleware(
 
 
 @app.get("/api/health")
-def health() -> dict[str, str]:
-    return {"status": "ok", "database": str(DB_PATH)}
+def health() -> dict[str, Any]:
+    return {"status": "ok", "database": str(DB_PATH), "ai": get_ai_status()}
+
+
+@app.get("/api/ai/status")
+def ai_status() -> dict[str, Any]:
+    return get_ai_status()
 
 
 @app.get("/api/scenarios")
 def list_scenarios() -> list[dict[str, Any]]:
     with connect() as conn:
         return [dict(row) for row in conn.execute("SELECT * FROM scenarios ORDER BY id").fetchall()]
+
+
+@app.get("/api/bootstrap")
+def bootstrap() -> dict[str, Any]:
+    with connect() as conn:
+        scenario_ids = [row["id"] for row in conn.execute("SELECT id FROM scenarios ORDER BY id").fetchall()]
+        return {
+            "source": "fastapi-sqlite",
+            "ai": get_ai_status(),
+            "scenarios": {scenario_id: get_frontend_config(conn, scenario_id) for scenario_id in scenario_ids},
+        }
 
 
 @app.get("/api/scenarios/{scenario_id}")
@@ -300,12 +565,16 @@ def get_scenario(scenario_id: str) -> dict[str, Any]:
 @app.get("/api/questions/{scenario_id}")
 def list_questions(scenario_id: str) -> list[dict[str, Any]]:
     with connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM questions WHERE scenario_id = ? ORDER BY id",
+            (scenario_id,),
+        ).fetchall()
         return [
-            dict(row)
-            for row in conn.execute(
-                "SELECT * FROM questions WHERE scenario_id = ? ORDER BY id",
-                (scenario_id,),
-            ).fetchall()
+            {
+                **dict(row),
+                "options": get_question_options(conn, scenario_id, row["id"]),
+            }
+            for row in rows
         ]
 
 
@@ -404,6 +673,16 @@ def diagnose(payload: DiagnosisRequest) -> dict[str, Any]:
                 (payload.scenario_id, weakest["id"]),
             ).fetchall()
         ]
+        ai_report = generate_ai_report(
+            ai_enabled=payload.ai_enabled,
+            scenario=dict(scenario),
+            accuracy=accuracy,
+            stability=stability,
+            weakest=weakest,
+            error_counts=error_counts,
+            recommendations=recommendations,
+            details=details,
+        )
 
         return {
             "diagnosis_id": diagnosis_id,
@@ -414,6 +693,7 @@ def diagnose(payload: DiagnosisRequest) -> dict[str, Any]:
             "error_counts": error_counts,
             "updated_nodes": updated_nodes,
             "recommendations": recommendations,
+            "ai_report": ai_report,
             "created_at": now,
         }
 
@@ -439,3 +719,18 @@ def class_dashboard(scenario_id: str) -> dict[str, Any]:
             "class_accuracy": accuracy,
             "diagnosis_count": len(diagnoses),
         }
+
+
+@app.get("/")
+def serve_index() -> FileResponse:
+    return FileResponse(FRONTEND_DIR / "index.html")
+
+
+@app.get("/app.js")
+def serve_app_js() -> FileResponse:
+    return FileResponse(FRONTEND_DIR / "app.js")
+
+
+@app.get("/styles.css")
+def serve_styles() -> FileResponse:
+    return FileResponse(FRONTEND_DIR / "styles.css")
