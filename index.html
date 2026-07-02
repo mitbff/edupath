@@ -1,0 +1,458 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>EduPath 智能导学 Agent</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;900&family=Roboto+Mono:wght@500;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="系统导航">
+        <div class="brand">
+          <div class="brand-mark">E</div>
+          <div>
+            <strong>EduPath</strong>
+            <span>智能导学 Agent</span>
+          </div>
+        </div>
+
+        <nav class="nav-list">
+          <button class="nav-item active" data-view="overview" type="button">
+            <span>系统总览</span>
+            <b>01</b>
+          </button>
+          <button class="nav-item" data-view="quiz" type="button">
+            <span>智能答题</span>
+            <b>02</b>
+          </button>
+          <button class="nav-item" data-view="student" type="button">
+            <span>学生报告</span>
+            <b>03</b>
+          </button>
+          <button class="nav-item" data-view="teacher" type="button">
+            <span>教师看板</span>
+            <b>04</b>
+          </button>
+          <button class="nav-item" data-view="design" type="button">
+            <span>技术实现</span>
+            <b>05</b>
+          </button>
+        </nav>
+
+        <div class="sidebar-note">
+          <span>演示场景</span>
+          <strong id="scenarioName">高一数学 · 导数单元</strong>
+          <p id="scenarioSubtitle">学生完成诊断测验后，系统实时生成错因诊断、知识追踪、个性化练习与教师干预建议。</p>
+        </div>
+      </aside>
+
+      <main class="workspace">
+        <header class="topbar">
+          <div>
+            <span class="eyebrow">Smart Education Final Project</span>
+            <h1>基于知识图谱的错题诊断与个性化练习生成系统</h1>
+          </div>
+          <div class="top-actions">
+            <label class="scenario-switch">
+              <span>应用场景</span>
+              <select id="scenarioSelect" aria-label="切换应用场景"></select>
+            </label>
+            <button class="icon-btn" id="resetBtn" type="button" title="重置演示数据">↻</button>
+            <button class="primary-btn" data-view="quiz" type="button">开始答题诊断</button>
+          </div>
+        </header>
+
+        <section class="view-panel active" id="overview">
+          <div class="hero-grid">
+            <section class="mission-panel">
+              <span class="panel-label">系统闭环</span>
+              <h2>同一套诊断引擎，适配不同课程场景。</h2>
+              <p>
+                EduPath 将在线答题、错因诊断、知识追踪、知识图谱、个性化推荐和教师干预放进同一个平台。
+                数学、英语、编程等课程只需替换题库、知识节点和资源库，就能复用同一套导学 Agent。
+              </p>
+              <div class="metric-row">
+                <div>
+                  <strong id="avgMastery">68%</strong>
+                  <span>学生综合掌握度</span>
+                </div>
+                <div>
+                  <strong id="accuracyMetric">--</strong>
+                  <span>本次答题正确率</span>
+                </div>
+                <div>
+                  <strong id="weakNode">导数应用</strong>
+                  <span>当前最薄弱知识点</span>
+                </div>
+              </div>
+            </section>
+
+            <section class="path-panel">
+              <div class="panel-head">
+                <div>
+                  <span class="panel-label">知识图谱诊断</span>
+                  <h3>薄弱节点会在提交后自动变色</h3>
+                </div>
+                <span class="status-pill" id="diagnosisState">待答题</span>
+              </div>
+              <div class="chart graph-chart" id="knowledgeGraph"></div>
+            </section>
+          </div>
+
+          <section class="surface">
+            <div class="panel-head">
+              <div>
+                <span class="panel-label">场景配置中心</span>
+                <h3>从单一 demo 升级为可复用平台</h3>
+              </div>
+            </div>
+            <div class="scenario-grid" id="scenarioCards"></div>
+          </section>
+
+          <div class="content-grid three-columns">
+            <section class="surface mini-module">
+              <b>01</b>
+              <strong>在线答题</strong>
+              <p>8 道题覆盖函数基础、极限思想、导数定义、单调性和极值应用，记录答案、耗时、正确率。</p>
+            </section>
+            <section class="surface mini-module">
+              <b>02</b>
+              <strong>知识追踪</strong>
+              <p>用“旧掌握度 × 0.7 + 本次表现 × 0.3”的简化 BKT 公式更新每个知识点。</p>
+            </section>
+            <section class="surface mini-module">
+              <b>03</b>
+              <strong>AI 讲解生成</strong>
+              <p>根据错因标签生成讲解、复习建议和分层练习，后续可替换为真实大模型接口。</p>
+            </section>
+          </div>
+
+          <div class="content-grid two-columns">
+            <section class="surface chart-surface">
+              <div class="panel-head">
+                <div>
+                  <span class="panel-label">知识点掌握度</span>
+                  <h3>提交答题后实时更新</h3>
+                </div>
+              </div>
+              <div class="chart" id="masteryChart"></div>
+            </section>
+
+            <section class="surface">
+              <div class="panel-head">
+                <div>
+                  <span class="panel-label">诊断闭环</span>
+                  <h3>从作答到教学干预</h3>
+                </div>
+              </div>
+              <div class="flow-list">
+                <article>
+                  <b>1</b>
+                  <div>
+                    <strong>学生在线作答</strong>
+                    <p>每题绑定知识点、难度、正确答案和典型错因标签。</p>
+                  </div>
+                </article>
+                <article>
+                  <b>2</b>
+                  <div>
+                    <strong>系统自动诊断</strong>
+                    <p>根据正确率、耗时和题目难度计算本次表现分。</p>
+                  </div>
+                </article>
+                <article>
+                  <b>3</b>
+                  <div>
+                    <strong>更新知识图谱</strong>
+                    <p>薄弱知识点变红，相关前置知识点被标记为需要复查。</p>
+                  </div>
+                </article>
+                <article>
+                  <b>4</b>
+                  <div>
+                    <strong>生成分层干预</strong>
+                    <p>学生收到学习路径，教师获得班级错因排行和分层作业。</p>
+                  </div>
+                </article>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view-panel" id="quiz">
+          <div class="quiz-layout">
+            <section class="surface quiz-panel">
+              <div class="panel-head">
+                <div>
+                  <span class="panel-label">在线答题模块</span>
+              <h2 id="quizTitle">自适应诊断测验</h2>
+                </div>
+                <div class="timer-box">
+                  <span>用时</span>
+                  <strong id="quizTimer">00:00</strong>
+                </div>
+              </div>
+              <div class="quiz-progress" id="quizProgress"></div>
+              <div class="question-list" id="questionList"></div>
+              <div class="quiz-actions">
+                <button class="secondary-btn" id="fillDemoBtn" type="button">填入演示答案</button>
+                <button class="primary-btn" id="submitQuizBtn" type="button">提交并生成诊断</button>
+              </div>
+            </section>
+
+            <aside class="surface quiz-side">
+              <span class="panel-label">题目元数据</span>
+              <h3>每题都绑定知识点、难度和错因</h3>
+              <div class="metadata-list" id="metadataList"></div>
+            </aside>
+          </div>
+        </section>
+
+        <section class="view-panel" id="student">
+          <div class="student-layout">
+            <section class="surface student-card">
+              <div class="student-profile">
+                <div class="avatar">林</div>
+                <div>
+                  <span class="panel-label">学生画像</span>
+                  <h2 id="studentName">林一然</h2>
+                  <p id="studentSummary">尚未提交本次测验。可先进入“智能答题”页面完成诊断。</p>
+                </div>
+              </div>
+              <div class="diagnosis-box">
+                <span>AI 学习建议</span>
+                <p id="studentAdvice">完成测验后，系统会根据错因标签和薄弱知识点生成个性化学习建议。</p>
+              </div>
+              <div class="recommend-list" id="recommendList"></div>
+            </section>
+
+            <section class="surface chart-surface">
+              <div class="panel-head">
+                <div>
+                  <span class="panel-label">个人知识雷达</span>
+                  <h3>掌握度与班级均值对比</h3>
+                </div>
+              </div>
+              <div class="chart" id="radarChart"></div>
+            </section>
+          </div>
+
+          <div class="content-grid two-columns">
+            <section class="surface">
+              <div class="panel-head">
+                <div>
+                  <span class="panel-label">错因诊断</span>
+                  <h3>系统如何解释错误</h3>
+                </div>
+              </div>
+              <div class="mistake-list" id="mistakeList"></div>
+            </section>
+
+            <section class="surface">
+              <div class="panel-head">
+                <div>
+                  <span class="panel-label">个性化学习路径</span>
+                  <h3>先补根基，再做应用</h3>
+                </div>
+              </div>
+              <div class="timeline" id="studyTimeline"></div>
+            </section>
+          </div>
+
+          <section class="surface">
+            <div class="panel-head">
+              <div>
+                <span class="panel-label">高级诊断 Agent</span>
+                <h3>证据链、自适应下一题和资源匹配理由</h3>
+              </div>
+            </div>
+            <div class="advanced-grid">
+              <div class="advanced-panel" id="evidenceChain"></div>
+              <div class="advanced-panel" id="adaptiveNext"></div>
+              <div class="advanced-panel" id="resourceRationale"></div>
+            </div>
+          </section>
+
+          <section class="surface">
+            <div class="panel-head">
+              <div>
+                <span class="panel-label">AI 练习生成</span>
+                <h3>系统根据薄弱点自动生成下一组练习</h3>
+              </div>
+              <button class="secondary-btn" id="generatePracticeBtn" type="button">重新生成练习</button>
+            </div>
+            <div class="practice-grid" id="practiceGrid"></div>
+          </section>
+        </section>
+
+        <section class="view-panel" id="teacher">
+          <div class="content-grid two-columns">
+            <section class="surface chart-surface">
+              <div class="panel-head">
+                <div>
+                  <span class="panel-label">教师看板</span>
+                  <h3>班级知识点热力图</h3>
+                </div>
+              </div>
+              <div class="chart" id="heatChart"></div>
+            </section>
+
+            <section class="surface chart-surface">
+              <div class="panel-head">
+                <div>
+                  <span class="panel-label">高频错因排行</span>
+                  <h3>下一节课优先处理什么</h3>
+                </div>
+              </div>
+              <div class="chart" id="errorChart"></div>
+            </section>
+          </div>
+
+          <div class="content-grid two-columns">
+            <section class="surface">
+              <div class="panel-head">
+                <div>
+                  <span class="panel-label">教学干预建议</span>
+                  <h3>系统自动生成下节课策略</h3>
+                </div>
+              </div>
+              <div class="teacher-actions" id="teacherActions"></div>
+            </section>
+
+            <section class="surface">
+              <div class="panel-head">
+                <div>
+                  <span class="panel-label">自动生成分层作业</span>
+                  <h3>基础组、提升组、冲刺组不同任务</h3>
+                </div>
+              </div>
+              <div class="assignment-list" id="assignmentList"></div>
+            </section>
+          </div>
+
+          <section class="surface">
+            <div class="panel-head">
+              <div>
+                <span class="panel-label">学习风险预警</span>
+                <h3>结合掌握度、错因密度和答题稳定性生成干预优先级</h3>
+              </div>
+            </div>
+            <div class="risk-grid" id="riskPredictionGrid"></div>
+          </section>
+
+          <section class="surface">
+            <div class="panel-head">
+              <div>
+                <span class="panel-label">学生分层名单</span>
+                <h3>精准到人，而不是只看平均分</h3>
+              </div>
+            </div>
+            <div class="student-table" id="studentTable"></div>
+          </section>
+        </section>
+
+        <section class="view-panel" id="design">
+          <div class="content-grid two-columns">
+            <section class="surface">
+              <div class="panel-head">
+                <div>
+                  <span class="panel-label">诊断引擎流水线</span>
+                  <h2>系统从作答数据一步步生成诊断结果。</h2>
+                </div>
+              </div>
+              <div class="tech-pipeline" id="techPipeline"></div>
+            </section>
+
+            <section class="surface">
+              <div class="panel-head">
+                <div>
+                  <span class="panel-label">当前场景技术配置</span>
+                  <h2 id="techScenarioTitle">场景配置</h2>
+                </div>
+              </div>
+              <div class="tech-config-grid" id="techConfigGrid"></div>
+            </section>
+          </div>
+
+          <div class="content-grid two-columns">
+            <section class="surface">
+              <div class="panel-head">
+                <div>
+                  <span class="panel-label">知识追踪参数</span>
+                  <h3>当前原型实际使用的计算规则</h3>
+                </div>
+              </div>
+              <div class="formula-box">
+                <strong>知识点掌握度更新</strong>
+                <code>newMastery = oldMastery * 0.7 + performance * 0.3</code>
+              </div>
+              <div class="formula-box">
+                <strong>本次表现分</strong>
+                <code>performance = accuracy * 50 + difficultyScore * 0.2 + stability * 0.3</code>
+              </div>
+              <div class="formula-box">
+                <strong>稳定性估计</strong>
+                <code>stability = 100 - |averageTime - expectedTime| * 2</code>
+              </div>
+            </section>
+
+            <section class="surface">
+              <div class="panel-head">
+                <div>
+                  <span class="panel-label">模块接口映射</span>
+                  <h3>原型函数与正式后端接口一一对应</h3>
+                </div>
+              </div>
+              <div class="interface-list" id="interfaceList"></div>
+            </section>
+          </div>
+
+          <section class="surface">
+            <div class="panel-head">
+              <div>
+                <span class="panel-label">数据结构</span>
+                <h3>平台化落地时需要持久化的核心表</h3>
+              </div>
+            </div>
+            <div class="schema-grid">
+              <article>
+                <strong>scenario_configs</strong>
+                <p>课程场景、知识图谱、资源库、评分规则。</p>
+              </article>
+              <article>
+                <strong>questions</strong>
+                <p>题干、选项、答案、难度、知识点、错因标签。</p>
+              </article>
+              <article>
+                <strong>answer_logs</strong>
+                <p>学生答案、是否正确、耗时、提交时间。</p>
+              </article>
+              <article>
+                <strong>mastery_snapshots</strong>
+                <p>每次诊断后的知识点掌握度快照。</p>
+              </article>
+              <article>
+                <strong>recommendations</strong>
+                <p>微课、例题、巩固题、拓展题、错题复盘任务。</p>
+              </article>
+              <article>
+                <strong>ai_reports</strong>
+                <p>AI 讲解、学习建议、教师干预建议。</p>
+              </article>
+            </div>
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+    <script src="./app.js"></script>
+  </body>
+</html>
